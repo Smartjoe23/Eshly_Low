@@ -1,371 +1,406 @@
-export default function LRVManagerTool() {
-  /**
-   * Закон необходимого разнообразия (Эшби) — прикладной инструмент
-   * Евгений, это одностраничный инструмент для руководителей:
-   * 1) Опиши внешнее разнообразие (входы/кейсы) -> список.
-   * 2) Опиши управленческие ответы (ветви решений/SOP/полномочия) -> список.
-   * 3) Получи индексы покрытия, статус и рекомендации (усилить управление / ослабить внешнее разнообразие).
-   * Встроены шаблоны для ComEx, KOL и ACC 600 (Алматы). Можно печатать и экспортировать JSON/отчёт.
-   */
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sandoz · LRV Manager Tool</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','system-ui','Segoe UI','Roboto','Arial','sans-serif']}}}}</script>
+<style>
+:root{
+  --primary:#0033A0; --primary-strong:#01256F; --accent:#18A0FB;
+  --bg:#F6F8FB; --surface:#FFFFFF; --text:#0F172A; --mutetext:#475569; --border:#E2E8F0;
+}
+.btn{padding:8px 12px;border:1px solid #CBD5E1;border-radius:12px} .btn:hover{background:#F1F5F9}
+.btn-primary{background:var(--primary);color:#fff;border-color:transparent}.btn-primary:hover{background:var(--primary-strong)}
+.card{border:1px solid var(--border);border-radius:16px;background:#fff;box-shadow:0 1px 1px rgba(0,0,0,.02)}
+.brand{width:32px;height:32px;border-radius:8px;background:var(--primary)}
+.tabular-nums{font-variant-numeric:tabular-nums}
+.chip{font-size:12px;padding:2px 8px;border-radius:999px;border:1px solid}
+@media print{header,.no-print{display:none!important}.card{box-shadow:none}}
+</style>
+</head>
+<body class="bg-[var(--bg)] text-[var(--text)]">
+<div id="app" class="min-h-screen"></div>
 
-  // ------------ React state ------------
-  const [envItems, setEnvItems] = React.useState([
-    { id: 1, name: "", weight: 1 },
-  ]);
-  const [respItems, setRespItems] = React.useState([
-    { id: 1, name: "", weight: 1 },
-  ]);
-  const [notes, setNotes] = React.useState("");
-  const [showHelp, setShowHelp] = React.useState(false);
-  const [report, setReport] = React.useState("");
+<script>
+// ====== State ======
+const S = {
+  env: [{id:id(), name:'', weight:1}],
+  resp: [{id:id(), name:'', weight:1}],
+  notes:'', active:'diag', report:''
+};
+const $ = (sel, el=document)=> el.querySelector(sel);
+const $$ = (sel, el=document)=> Array.from(el.querySelectorAll(sel));
+function id(){ return Math.random().toString(36).slice(2)+Date.now().toString(36); }
+function clamp(v,a,b){ v=Number(v)||0; return Math.max(a, Math.min(b, v)); }
+function fix(n,d=2){ return Number.isFinite(n)? Number(n.toFixed(d)) : 0; }
+function nonEmpty(x){ return (x.name||'').trim().length>0; }
+function sumWeights(arr){ return arr.filter(nonEmpty).reduce((s,x)=> s + clamp(x.weight||1,1,5), 0); }
+function save(){ localStorage.setItem('lrv_state', JSON.stringify(S)); }
+function load(){ try{ Object.assign(S, JSON.parse(localStorage.getItem('lrv_state')||'{}')); }catch(e){} }
 
-  // ------------ Helpers ------------
-  const clamp = (v, min, max) => Math.max(min, Math.min(max, Number(v) || 0));
-  const nonEmpty = (x) => (x.name || "").trim().length > 0;
-  const sumWeights = (arr) => arr.filter(nonEmpty).reduce((s, x) => s + clamp(x.weight || 1, 1, 5), 0);
-  const countItems = (arr) => arr.filter(nonEmpty).length;
+// ====== Templates ======
+const TPL = {
+  comex: {
+    env:[
+      ['Сети: запрос на скидку',3],
+      ['Независимые: маркетинг/мерч',2],
+      ['E‑com: доставка/ассортимент',2],
+      ['Нестандарт: срок оплаты',3],
+      ['Нестандарт: доп. промо‑места',2],
+      ['Отклонения прогноза спроса',3],
+    ],
+    resp:[
+      ['Пороги полномочий по скидкам (±X%)',3],
+      ['Оффер‑матрица (trade‑offs) + шаблоны обоснований',3],
+      ['Еженедельный триаж заявок A/B/C на ComEx',2],
+      ['Шаблоны договоров/приложений',2],
+      ['Календарные окна промо и квоты на нестандарты',2],
+    ]
+  },
+  kol: {
+    env:[
+      ['KOL: цель — Education',2],
+      ['KOL: цель — Advisory',3],
+      ['KOL: цель — Collaboration',3],
+      ['Возражение: бренд‑замены/цена',2],
+      ['Ограничения комплаенса/материалы',2],
+    ],
+    resp:[
+      ['Три траектории + критерии входа',3],
+      ['SPV‑шаблоны под каждую траекторию',3],
+      ['Итог визита: КОМУ? ЧТО? ДО КОГДА?',2],
+      ['Право FLM на выбор траектории/микро‑оффера',2],
+    ]
+  },
+  acc: {
+    env:[
+      ['Сегмент: ОРЛ',2],
+      ['Сегмент: терапевт',2],
+      ['Сегмент: педиатр',2],
+      ['Канал: частная клиника',2],
+      ['Возражение: цена/замены',3],
+      ['Возражение: комплаенс/материалы',2],
+      ['Формат визита: короткий/полный',1],
+    ],
+    resp:[
+      ['SPV под ACC 600 по сегментам',3],
+      ['Мини‑trade матрица (даём/получаем)',2],
+      ['Скрипты под 3 ключевых возражения',3],
+      ['Чек‑лист: КОМУ? ЧТО? ДО КОГДА?',2],
+    ]
+  }
+};
 
-  // Metrics
-  const envCount = countItems(envItems);
-  const respCount = countItems(respItems);
-  const envW = sumWeights(envItems);
-  const respW = sumWeights(respItems);
+// ====== App ======
+function metric(){
+  const env = S.env.filter(nonEmpty), resp = S.resp.filter(nonEmpty);
+  const envCount = env.length, respCount = resp.length;
+  const envW = sumWeights(env), respW = sumWeights(resp);
+  const ratio = fix(envCount? respCount/envCount : 0);
+  const ratioW = fix(envW? respW/envW : 0);
+  const Henv = fix(envCount? Math.log2(envCount) : 0);
+  const Hresp = fix(respCount? Math.log2(respCount) : 0);
+  const Hgap = fix(Math.max(0, Henv - Hresp));
+  const status = ratioW < 1 ? ['Недобор (узкое горлышко)','border-red-300 text-red-800 bg-red-100']
+    : ratioW < 1.5 ? ['Приемлемо, но уязвимо','border-amber-300 text-amber-800 bg-amber-100']
+    : ['Есть запас гибкости','border-emerald-300 text-emerald-800 bg-emerald-100'];
+  return {envCount, respCount, envW, respW, ratio, ratioW, Henv, Hresp, Hgap, status};
+}
 
-  const ratioSimple = envCount === 0 ? 0 : +(respCount / envCount).toFixed(2);
-  const ratioWeighted = envW === 0 ? 0 : +(respW / envW).toFixed(2);
-
-  // Status evaluation
-  function evalStatus(r) {
-    if (r < 1) return { label: "Недобор (узкое горлышко)", color: "bg-red-100 text-red-800 border-red-300" };
-    if (r < 1.5) return { label: "Приемлемо, но уязвимо", color: "bg-amber-100 text-amber-800 border-amber-300" };
-    return { label: "Есть запас гибкости", color: "bg-emerald-100 text-emerald-800 border-emerald-300" };
-  }
-  const simpleStatus = evalStatus(ratioSimple);
-  const weightedStatus = evalStatus(ratioWeighted);
-
-  // Actions suggestions based on deficit/excess
-  const needStrengthen = ratioWeighted < 1.5; // чуть консервативнее
-  const needFilter = ratioWeighted < 1 || envCount > 20; // когда вход "шумит" или явный недобор
-
-  // ------------ CRUD for lists ------------
-  function addEnv() {
-    setEnvItems((xs) => [...xs, { id: Date.now() + Math.random(), name: "", weight: 1 }]);
-  }
-  function addResp() {
-    setRespItems((xs) => [...xs, { id: Date.now() + Math.random(), name: "", weight: 1 }]);
-  }
-  function updEnv(id, field, value) {
-    setEnvItems((xs) => xs.map((x) => (x.id === id ? { ...x, [field]: field === "weight" ? clamp(value, 1, 5) : value } : x)));
-  }
-  function updResp(id, field, value) {
-    setRespItems((xs) => xs.map((x) => (x.id === id ? { ...x, [field]: field === "weight" ? clamp(value, 1, 5) : value } : x)));
-  }
-  function delEnv(id) {
-    setEnvItems((xs) => xs.filter((x) => x.id !== id));
-  }
-  function delResp(id) {
-    setRespItems((xs) => xs.filter((x) => x.id !== id));
-  }
-  function resetAll() {
-    setEnvItems([{ id: 1, name: "", weight: 1 }]);
-    setRespItems([{ id: 1, name: "", weight: 1 }]);
-    setNotes("");
-    setReport("");
-  }
-
-  // ------------ Templates ------------
-  function loadTemplate(name) {
-    if (name === "comex") {
-      setEnvItems([
-        { id: 1, name: "Канал: сети аптек — запросы на скидку", weight: 3 },
-        { id: 2, name: "Канал: независимые аптеки — маркетинговые активности", weight: 2 },
-        { id: 3, name: "Канал: e-com — условия доставки/ассортимента", weight: 2 },
-        { id: 4, name: "Нестандарты: сроки оплаты", weight: 3 },
-        { id: 5, name: "Нестандарты: дополнительные промо-места", weight: 2 },
-        { id: 6, name: "Отклонения прогноза спроса", weight: 3 },
-      ]);
-      setRespItems([
-        { id: 7, name: "Границы полномочий регионов по скидкам (±X%)", weight: 3 },
-        { id: 8, name: "Оффер-матрица (trade-offs) + шаблоны обоснования", weight: 3 },
-        { id: 9, name: "Триаж заявок A/B/C на еженедельном ComEx", weight: 2 },
-        { id: 10, name: "Шаблоны договоров/приложений", weight: 2 },
-        { id: 11, name: "Календарные окна промо и квоты на нестандарты", weight: 2 },
-      ]);
-      setNotes("Шаблон ComEx загружен: настрой границы, офферы и триаж под ваш рынок.");
-    }
-    if (name === "kol") {
-      setEnvItems([
-        { id: 1, name: "Встреча с KOL: цель — образование пациентов/коллег", weight: 2 },
-        { id: 2, name: "Встреча с KOL: цель — экспертная консультация (advisory)", weight: 3 },
-        { id: 3, name: "Встреча с KOL: цель — совместный проект/пилот", weight: 3 },
-        { id: 4, name: "Возражения: бренд-замены/цена", weight: 2 },
-        { id: 5, name: "Ограничения комплаенса/формат материалов", weight: 2 },
-      ]);
-      setRespItems([
-        { id: 6, name: "Три траектории: Education / Advisory / Collaboration", weight: 3 },
-        { id: 7, name: "SPV-шаблоны под каждую траекторию", weight: 3 },
-        { id: 8, name: "Чек-лист итогов визита: КОМУ? ЧТО? ДО КОГДА?", weight: 2 },
-        { id: 9, name: "Право FLM выбирать траекторию и микро-оффер", weight: 2 },
-      ]);
-      setNotes("Шаблон KOL загружен: уточни материалы и критерии готовности.");
-    }
-    if (name === "acc") {
-      setEnvItems([
-        { id: 1, name: "Сегмент врача: оториноларинголог", weight: 2 },
-        { id: 2, name: "Сегмент врача: терапевт", weight: 2 },
-        { id: 3, name: "Сегмент врача: педиатр", weight: 2 },
-        { id: 4, name: "Канал: частная клиника", weight: 2 },
-        { id: 5, name: "Возражение: цена/бренд-замены", weight: 3 },
-        { id: 6, name: "Возражение: комплаенс/материалы", weight: 2 },
-        { id: 7, name: "Формат визита: короткий/полный", weight: 1 },
-      ]);
-      setRespItems([
-        { id: 8, name: "SPV под ACC 600 для каждого сегмента", weight: 3 },
-        { id: 9, name: "Мини-trade матрица (что даём/что получаем)", weight: 2 },
-        { id: 10, name: "Ветвящийся скрипт под 3 ключевых возражения", weight: 3 },
-        { id: 11, name: "Чек-лист фиксации: КОМУ? ЧТО? ДО КОГДА?", weight: 2 },
-      ]);
-      setNotes("Шаблон ACC 600 загружен: адаптируй под Алмату/регион.");
-    }
-  }
-
-  // ------------ Report & Export ------------
-  function buildReport() {
-    const time = new Date().toLocaleString();
-    const envList = envItems.filter(nonEmpty).map((x, i) => `${i + 1}. ${x.name} [вес ${clamp(x.weight, 1, 5)}]`).join("\n");
-    const respList = respItems.filter(nonEmpty).map((x, i) => `${i + 1}. ${x.name} [вес ${clamp(x.weight, 1, 5)}]`).join("\n");
-    const text = `ЗАКОН НЕОБХОДИМОГО РАЗНООБРАЗИЯ — ОЦЕНКА\nДата/время: ${time}\n\nВнешнее разнообразие (входы): ${envCount} позиций, суммарный вес ${envW}\n${envList}\n\nУправленческие ответы (ветви): ${respCount} позиций, суммарный вес ${respW}\n${respList}\n\nИндексы покрытия:\n— Простой: ${ratioSimple} (${simpleStatus.label})\n— Взвешенный: ${ratioWeighted} (${weightedStatus.label})\n\nРекомендации:\n${needStrengthen ? "• Усилить управленческое разнообразие: делегирование, ветвящиеся SOP/плейбуки, оффер-матрицы, конфигурируемые правила в ИС." : "• Управленческое разнообразие в норме: поддерживайте ежемесячную калибровку ветвей/полномочий."}\n${needFilter ? "• Ослабить внешнее разнообразие: сегментация, стандартизированные формы/ворота, окна/квоты, рационализация SKU." : "• Внешнее разнообразие под контролем: держите стандарты входа и каталоги в актуальном состоянии."}\n\nЗаметки:\n${notes || "—"}`;
-    setReport(text);
-  }
-
-  function copyReport() {
-    if (!report) buildReport();
-    setTimeout(() => {
-      navigator.clipboard.writeText(report || "");
-      alert("Отчёт скопирован в буфер обмена");
-    }, 50);
-  }
-
-  function exportJSON() {
-    const data = {
-      generatedAt: new Date().toISOString(),
-      envItems: envItems.filter(nonEmpty),
-      respItems: respItems.filter(nonEmpty),
-      metrics: { envCount, respCount, envW, respW, ratioSimple, ratioWeighted },
-      notes,
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "lrv-assessment.json";
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function printPage() {
-    window.print();
-  }
-
-  // ------------ UI -------------
-  return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/90 backdrop-blur">
-        <div className="mx-auto max-w-6xl px-4 py-4 flex items-center justify-between">
-          <h1 className="text-xl md:text-2xl font-semibold tracking-tight">Закон необходимого разнообразия — инструмент руководителя</h1>
-          <div className="flex gap-2">
-            <button onClick={() => setShowHelp((v) => !v)} className="px-3 py-2 rounded-xl border border-slate-300 hover:bg-slate-100">Справка</button>
-            <button onClick={printPage} className="px-3 py-2 rounded-xl border border-slate-300 hover:bg-slate-100">Печать</button>
+function render(){
+  const root = document.getElementById('app');
+  const m = metric();
+  root.innerHTML = `
+    <header class="sticky top-0 z-20 border-b" style="border-color:var(--border)">
+      <div class="mx-auto max-w-6xl px-4 py-3 flex items-center gap-3 justify-between bg-white/90 backdrop-blur">
+        <div class="flex items-center gap-3">
+          <div class="brand"></div>
+          <div class="leading-tight">
+            <div class="font-semibold">Sandoz · LRV Manager</div>
+            <div class="text-xs text-slate-500">Law of Requisite Variety — управленческий инструмент</div>
           </div>
         </div>
-      </header>
-
-      {showHelp && (
-        <section className="mx-auto max-w-6xl px-4 py-4">
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 md:p-6 shadow-sm">
-            <h2 className="text-lg font-semibold mb-2">Как пользоваться</h2>
-            <ol className="list-decimal ml-5 space-y-1 text-sm md:text-base">
-              <li>В блоке <b>«Шаг 1»</b> перечислите разные типы входов/кейсов (сегменты клиентов, типы запросов, ключевые возражения и т.п.). При желании оцените важность (вес 1–5).</li>
-              <li>В блоке <b>«Шаг 2»</b> перечислите реальные управленческие ветви (SOP/политики, полномочия, шаблоны офферов, скрипты, конфигурируемые правила).</li>
-              <li>В <b>«Шаг 3»</b> посмотрите индексы покрытия. Если индекс ниже 1 — недобор, 1–1.5 — уязвимо, выше 1.5 — запас.</li>
-              <li>Снизу появятся рекомендации: где <i>усилить управление</i>, а где <i>ослабить внешнее разнообразие</i> (сегментация, стандарты входа, окна/квоты).</li>
-              <li>Добавьте свои заметки, сформируйте отчёт, скачайте JSON или отправьте отчёт (копировать в буфер).</li>
-            </ol>
-            <div className="mt-3 text-xs text-slate-600">Памятка: «Только разнообразие в управлении уменьшает разнообразие исходов». Балансируйте два рычага: наращивайте ветви решений и/или фильтруйте вход.</div>
+        <div class="flex items-center gap-2 no-print">
+          <div class="relative">
+            <button class="btn" id="tplBtn">📁 Шаблоны</button>
+            <div id="tplMenu" class="hidden absolute right-0 mt-2 w-64 card p-2">
+              <button class="w-full text-left btn" data-tpl="comex">ComEx</button>
+              <button class="w-full text-left btn" data-tpl="kol">KOL</button>
+              <button class="w-full text-left btn" data-tpl="acc">ACC 600 (Алматы)</button>
+            </div>
           </div>
-        </section>
-      )}
+          <button class="btn" id="exportBtn">Экспорт</button>
+          <label class="btn cursor-pointer">Импорт
+            <input type="file" accept="application/json" class="hidden" id="importFile">
+          </label>
+          <button class="btn" id="printBtn">Печать</button>
+        </div>
+      </div>
+    </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-6 grid md:grid-cols-2 gap-4 md:gap-6">
-        {/* Шаг 1 */}
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 md:p-6 shadow-sm">
-          <h2 className="text-lg font-semibold mb-1">Шаг 1. Внешнее разнообразие (входы)</h2>
-          <p className="text-sm text-slate-600 mb-4">Примеры: типы клиентов/каналов, виды запросов, ключевые возражения, ограничения комплаенса и т.д.</p>
-          <ListEditor
-            items={envItems}
-            onAdd={addEnv}
-            onChange={updEnv}
-            onDelete={delEnv}
-            placeholder="Например: Сеть аптек — запрос на скидку"
-          />
-        </section>
+    <div class="mx-auto max-w-6xl px-4 pt-4">
+      <div class="flex gap-2">
+        ${['env','resp','diag','plan'].map(id=>`
+          <button data-tab="${id}" class="px-3 py-2 rounded-xl border ${S.active===id?'bg-[var(--primary)] text-white border-transparent':'border-slate-300 hover:bg-slate-100'}">
+            ${id==='env'?'1) Входы':id==='resp'?'2) Ветви':id==='diag'?'3) Диагностика':'4) План'}
+          </button>`).join('')}
+      </div>
+    </div>
 
-        {/* Шаг 2 */}
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 md:p-6 shadow-sm">
-          <h2 className="text-lg font-semibold mb-1">Шаг 2. Управленческие ответы (ветви решений)</h2>
-          <p className="text-sm text-slate-600 mb-4">Примеры: полномочия, ветвящиеся SOP/плейбуки, оффер-матрицы, шаблоны ответов, конфигурируемые правила ИС.</p>
-          <ListEditor
-            items={respItems}
-            onAdd={addResp}
-            onChange={updResp}
-            onDelete={delResp}
-            placeholder="Например: Региональное право скидки до ±X%"
-          />
-        </section>
+    <main class="mx-auto max-w-6xl px-4 pb-8 grid md:grid-cols-2 gap-4">
+      ${S.active==='env'?`
+        <section class="card p-4 md:p-6">
+          <h2 class="text-lg font-semibold mb-1">Шаг 1. Внешнее разнообразие</h2>
+          <p class="text-sm text-slate-600 mb-4">Типы клиентов/каналов, виды запросов, ключевые возражения, ограничения. Оцените важность (1–5).</p>
+          ${listEditor('env','Напр.: Сети — запрос на скидку')}
+        </section>`:''}
 
-        {/* Шаг 3 */}
-        <section className="md:col-span-2 rounded-2xl border border-slate-200 bg-white p-4 md:p-6 shadow-sm">
-          <h2 className="text-lg font-semibold mb-4">Шаг 3. Результаты и рекомендации</h2>
-          <div className="grid md:grid-cols-3 gap-4">
-            <MetricCard title="Входов (шт)" value={envCount} sub={`Суммарный вес: ${envW}`} />
-            <MetricCard title="Ветвей (шт)" value={respCount} sub={`Суммарный вес: ${respW}`} />
-            <div className="rounded-2xl border border-slate-200 p-4">
-              <div className="text-sm font-medium text-slate-700">Индексы покрытия</div>
-              <div className="mt-2 flex flex-col gap-2">
-                <BadgeLine label="Простой" value={ratioSimple} status={simpleStatus} />
-                <BadgeLine label="Взвешенный" value={ratioWeighted} status={weightedStatus} />
+      ${S.active==='resp'?`
+        <section class="card p-4 md:p-6">
+          <h2 class="text-lg font-semibold mb-1">Шаг 2. Управленческие ветви</h2>
+          <p class="text-sm text-slate-600 mb-4">Полномочия, SOP/плейбуки, оффер‑матрицы, шаблоны ответов, конфигурируемые правила ИС.</p>
+          ${listEditor('resp','Напр.: Регион — право скидки до ±X%')}
+        </section>`:''}
+
+      ${S.active==='diag'?`
+        <section class="card p-4 md:p-6 md:col-span-2">
+          <h2 class="text-lg font-semibold mb-4">Шаг 3. Диагностика</h2>
+          <div class="grid md:grid-cols-4 gap-4">
+            ${metricCard('Входов (шт)', m.envCount, 'Вес: '+m.envW)}
+            ${metricCard('Ветвей (шт)', m.respCount, 'Вес: '+m.respW)}
+            <div class="card p-4">
+              <div class="text-sm font-medium text-slate-700">Индексы покрытия</div>
+              <div class="mt-2 flex flex-col gap-2">
+                ${badgeLine('Простой', m.ratio, m.status)}
+                ${badgeLine('Взвешенный', m.ratioW, m.status)}
               </div>
             </div>
+            <div class="card p-4">
+              <div class="text-sm font-medium text-slate-700">Сложность (биты)</div>
+              <div class="mt-2 text-sm">Среда: <b>${m.Henv}</b> • Управление: <b>${m.Hresp}</b> • Разрыв: <b>${m.Hgap}</b></div>
+            </div>
           </div>
 
-          <div className="mt-6 grid md:grid-cols-2 gap-4">
-            <div className="rounded-2xl border border-slate-200 p-4">
-              <h3 className="font-semibold mb-2">Усилить управленческое разнообразие</h3>
-              <ul className="text-sm list-disc ml-5 space-y-1">
-                <li className={needStrengthen ? "" : "opacity-60"}>Делегирование по порогам решений (регион/ComEx/HQ)</li>
-                <li className={needStrengthen ? "" : "opacity-60"}>Ветвящиеся SOP/плейбуки (если/то) под 80 % кейсов</li>
-                <li className={needStrengthen ? "" : "opacity-60"}>Оффер-матрицы и шаблоны обоснований (trade-offs)</li>
-                <li className={needStrengthen ? "" : "opacity-60"}>Конфигурируемые правила в ИС (без релиза)</li>
-                <li className={needStrengthen ? "" : "opacity-60"}>Кросс-обучение и взаимозаменяемость ролей</li>
+          <div class="mt-6 grid md:grid-cols-2 gap-4">
+            <div class="card p-4">
+              <h3 class="font-semibold mb-2">Усилить управление</h3>
+              <ul class="list-disc ml-5 text-sm space-y-1">
+                ${['Делегирование по порогам (регион/ComEx/HQ)',
+                   'Ветвящиеся SOP/плейбуки (if/then) под 80 % кейсов',
+                   'Оффер‑матрицы и шаблоны обоснований',
+                   'Конфигурируемые правила в ИС (без релиза)',
+                   'Кросс‑обучение и взаимозаменяемость ролей']
+                   .map(s=>`<li class="${m.ratioW<1.5?'':'opacity-60'}">${s}</li>`).join('')}
               </ul>
             </div>
-            <div className="rounded-2xl border border-slate-200 p-4">
-              <h3 className="font-semibold mb-2">Ослабить внешнее разнообразие</h3>
-              <ul className="text-sm list-disc ml-5 space-y-1">
-                <li className={needFilter ? "" : "opacity-60"}>Сегментация каналов/клиентов и разные правила</li>
-                <li className={needFilter ? "" : "opacity-60"}>Стандарты входа: формы, обязательные поля, «ворота»</li>
-                <li className={needFilter ? "" : "opacity-60"}>Окна/квоты на нестандарты и «красная кнопка»</li>
-                <li className={needFilter ? "" : "opacity-60"}>Рационализация SKU и каталогов</li>
+            <div class="card p-4">
+              <h3 class="font-semibold mb-2">Ослабить вход</h3>
+              <ul class="list-disc ml-5 text-sm space-y-1">
+                ${['Сегментация каналов/клиентов и разные правила',
+                   'Стандарты входа: формы/обязательные поля/«ворота»',
+                   'Окна/квоты на нестандарты, эскалация по критериям',
+                   'Рационализация SKU и каталогов']
+                   .map(s=>`<li class="${(m.ratioW<1 || m.envCount>20)?'':'opacity-60'}">${s}</li>`).join('')}
               </ul>
             </div>
           </div>
 
-          <div className="mt-6">
-            <label className="block text-sm font-medium text-slate-700 mb-2">Заметки / контекст</label>
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={4} className="w-full rounded-xl border border-slate-300 p-3 focus:outline-none focus:ring-2 focus:ring-slate-400" placeholder="Добавьте важные нюансы: ограничения комплаенса, сезоны, KPI и т.п." />
+          <div class="mt-6">
+            <label class="block text-sm font-medium text-slate-700 mb-2">Заметки / контекст</label>
+            <textarea id="notes" rows="4" class="w-full rounded-xl border border-slate-300 p-3 focus:outline-none focus:ring-2 focus:ring-slate-400" placeholder="Ограничения комплаенса, сезоны, KPI и т.п.">${escapeHtml(S.notes)}</textarea>
           </div>
 
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button onClick={buildReport} className="px-4 py-2 rounded-xl bg-slate-900 text-white hover:bg-slate-800">Сформировать отчёт</button>
-            <button onClick={copyReport} className="px-4 py-2 rounded-xl border border-slate-300 hover:bg-slate-100">Копировать отчёт</button>
-            <button onClick={exportJSON} className="px-4 py-2 rounded-xl border border-slate-300 hover:bg-slate-100">Экспорт JSON</button>
-            <button onClick={resetAll} className="px-4 py-2 rounded-xl border border-slate-300 hover:bg-slate-100">Сброс</button>
+          <div class="mt-4 flex flex-wrap gap-2 no-print">
+            <button class="btn-primary btn" id="reportBtn">Сформировать и скопировать отчёт</button>
+            <button class="btn" id="resetBtn">Сброс</button>
           </div>
 
-          {report && (
-            <div className="mt-4">
-              <label className="block text-sm font-medium text-slate-700 mb-2">Предпросмотр отчёта</label>
-              <pre className="whitespace-pre-wrap rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">{report}</pre>
-            </div>
-          )}
-        </section>
+          ${S.report?`
+          <div class="mt-4">
+            <label class="block text-sm font-medium text-slate-700 mb-2">Предпросмотр отчёта</label>
+            <pre class="whitespace-pre-wrap card p-3 text-sm">${escapeHtml(S.report)}</pre>
+          </div>`:''}
+        </section>`:''}
 
-        {/* Шаблоны */}
-        <section className="md:col-span-2 rounded-2xl border border-slate-200 bg-white p-4 md:p-6 shadow-sm">
-          <h2 className="text-lg font-semibold mb-3">Готовые шаблоны</h2>
-          <div className="flex flex-wrap gap-2">
-            <button onClick={() => loadTemplate("comex")} className="px-4 py-2 rounded-xl border border-slate-300 hover:bg-slate-100">ComEx</button>
-            <button onClick={() => loadTemplate("kol")} className="px-4 py-2 rounded-xl border border-slate-300 hover:bg-slate-100">KOL</button>
-            <button onClick={() => loadTemplate("acc")} className="px-4 py-2 rounded-xl border border-slate-300 hover:bg-slate-100">ACC 600 (Алматы)</button>
-          </div>
-          <p className="text-xs text-slate-600 mt-2">Шаблоны загружают примеры для быстрого старта. Отредактируйте под ваш контекст.</p>
-        </section>
+      ${S.active==='plan'?`
+        <section class="card p-4 md:p-6 md:col-span-2">
+          <h2 class="text-lg font-semibold mb-2">Шаг 4. План внедрения (1–4 недели)</h2>
+          <ol class="list-decimal ml-5 text-sm space-y-1">
+            <li>Согласовать границы полномочий и «красные линии».</li>
+            <li>Собрать ветвящийся SOP/плейбук под топ‑80 % кейсов.</li>
+            <li>Запустить стандарты входа (формы/ворота) и квоты.</li>
+            <li>Настроить self‑service дашборды/правила без релиза.</li>
+            <li>Еженедельная калибровка на ComEx: что добавить/урезать.</li>
+          </ol>
+        </section>`:''}
+    </main>
 
-        {/* Теория кратко */}
-        <section className="md:col-span-2 rounded-2xl border border-slate-200 bg-white p-4 md:p-6 shadow-sm print:break-before-page">
-          <h2 className="text-lg font-semibold mb-2">Краткая теория для команды</h2>
-          <div className="text-sm text-slate-700 space-y-2">
-            <p><b>Закон необходимого разнообразия (Эшби):</b> управлять исходами возможно только если разнообразие управленческих ответов не меньше разнообразия входов среды.</p>
-            <p><b>Практический вывод:</b> либо увеличиваем число «ветвей» (делегирование, SOP, офферы, гибкая ИС), либо уменьшаем «шум» входа (сегментация, стандарты, окна/квоты), чаще — и то, и другое.</p>
-            <p><b>Правило одного экрана:</b> если центр не «тянет» решения в разумные сроки — переносим часть решений вниз по иерархии и чётко задаём границы.</p>
-          </div>
-        </section>
-      </main>
+    <footer class="mx-auto max-w-6xl px-4 py-6 text-xs text-slate-500">
+      Готово для GitHub Pages. Один экран, явные шаги, печать/экспорт. Обновляйте ветви и стандарты входа ежемесячно.
+    </footer>
+  `;
 
-      <footer className="mx-auto max-w-6xl px-4 py-6 text-xs text-slate-500">
-        Сделано как «дуракаустойчивый» инструмент: один экран, явные шаги, печать/экспорт. Обновляйте ветви и стандарты входа ежемесячно.
-      </footer>
-    </div>
-  );
+  // Bind events
+  $$('#app [data-tab]').forEach(b=> b.onclick = ()=> { S.active=b.dataset.tab; save(); render(); });
+  $('#tplBtn')?.addEventListener('click', ()=> $('#tplMenu').classList.toggle('hidden'));
+  $$('#tplMenu button').forEach(b=> b.onclick = ()=> loadTpl(b.dataset.tpl));
+  $('#exportBtn')?.addEventListener('click', exportJSON);
+  $('#importFile')?.addEventListener('change', (e)=> e.target.files[0] && importJSON(e.target.files[0]));
+  $('#printBtn')?.addEventListener('click', ()=> window.print());
+  $('#reportBtn')?.addEventListener('click', buildReport);
+  $('#resetBtn')?.addEventListener('click', resetAll);
+  $('#notes')?.addEventListener('input', (e)=> { S.notes = e.target.value; save(); });
 }
 
-// ------------- Components -------------
-function ListEditor({ items, onAdd, onChange, onDelete, placeholder }) {
-  return (
-    <div>
-      <div className="space-y-2">
-        {items.map((x, idx) => (
-          <div key={x.id} className="grid grid-cols-12 gap-2 items-center">
-            <div className="col-span-9">
-              <input
-                value={x.name}
-                onChange={(e) => onChange(x.id, "name", e.target.value)}
-                className="w-full rounded-xl border border-slate-300 p-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
-                placeholder={idx === 0 ? placeholder : "Опишите элемент"}
-              />
-            </div>
-            <div className="col-span-2">
-              <label className="text-xs text-slate-500 block mb-1">Вес (1–5)</label>
-              <input
-                type="number"
-                min={1}
-                max={5}
-                value={x.weight}
-                onChange={(e) => onChange(x.id, "weight", e.target.value)}
-                className="w-full rounded-xl border border-slate-300 p-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
-              />
-            </div>
-            <div className="col-span-1 flex justify-end">
-              <button onClick={() => onDelete(x.id)} title="Удалить" className="h-10 w-10 rounded-xl border border-slate-300 hover:bg-slate-100">×</button>
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="mt-3">
-        <button onClick={onAdd} className="px-3 py-2 rounded-xl border border-slate-300 hover:bg-slate-100">Добавить</button>
-      </div>
+function listEditor(kind, placeholder){
+  const arr = S[kind];
+  return `
+    <div class="space-y-2">
+      ${arr.map((x,i)=>`
+      <div class="grid grid-cols-12 gap-2 items-center">
+        <div class="col-span-9">
+          <input data-${kind}="${x.id}" class="w-full rounded-xl border border-slate-300 p-2 focus:outline-none focus:ring-2 focus:ring-slate-400" placeholder="${i===0?placeholder:'Опишите элемент'}" value="${escapeAttr(x.name)}">
+        </div>
+        <div class="col-span-2">
+          <label class="text-xs text-slate-500 block mb-1">Вес (1–5)</label>
+          <input type="number" min="1" max="5" data-${kind}-w="${x.id}" class="w-full rounded-xl border border-slate-300 p-2 focus:outline-none focus:ring-2 focus:ring-slate-400" value="${x.weight}">
+        </div>
+        <div class="col-span-1 flex justify-end">
+          <button class="btn" data-${kind}-del="${x.id}" title="Удалить">×</button>
+        </div>
+      </div>`).join('')}
     </div>
-  );
+    <div class="mt-3"><button class="btn" id="add-${kind}">Добавить</button></div>
+  `;
 }
 
-function MetricCard({ title, value, sub }) {
-  return (
-    <div className="rounded-2xl border border-slate-200 p-4">
-      <div className="text-sm font-medium text-slate-700">{title}</div>
-      <div className="text-3xl font-semibold mt-1">{value}</div>
-      {sub && <div className="text-xs text-slate-500 mt-1">{sub}</div>}
-    </div>
-  );
+function metricCard(title, value, sub){
+  return `<div class="card p-4">
+    <div class="text-sm font-medium text-slate-700">${title}</div>
+    <div class="text-3xl font-semibold mt-1 tabular-nums">${value}</div>
+    ${sub? `<div class="text-xs text-slate-500 mt-1">${sub}</div>`:''}
+  </div>`;
 }
 
-function BadgeLine({ label, value, status }) {
-  return (
-    <div className="flex items-center justify-between gap-2">
-      <div className="text-sm text-slate-700">{label}</div>
-      <div className="flex items-center gap-2">
-        <div className="text-lg font-semibold tabular-nums">{value}</div>
-        <span className={`text-xs px-2 py-1 rounded-full border ${status.color}`}>{status.label}</span>
-      </div>
+function badgeLine(label, value, status){
+  return `<div class="flex items-center justify-between gap-2">
+    <div class="text-sm text-slate-700">${label}</div>
+    <div class="flex items-center gap-2">
+      <div class="text-lg font-semibold tabular-nums">${value}</div>
+      <span class="chip ${status[1]}">${status[0]}</span>
     </div>
-  );
+  </div>`;
 }
+
+function bindList(kind){
+  // inputs
+  $$(`#app [data-${kind}]`).forEach(inp=>{
+    inp.oninput = ()=> { const x = S[kind].find(v=> v.id===inp.dataset[kind]); if(x){ x.name = inp.value; save(); } };
+  });
+  $$(`#app [data-${kind}-w]`).forEach(inp=>{
+    inp.oninput = ()=> { const x = S[kind].find(v=> v.id===inp.dataset[kind+'W']); if(x){ x.weight = clamp(inp.value,1,5); save(); } };
+  });
+  $$(`#app [data-${kind}-del]`).forEach(btn=>{
+    btn.onclick = ()=> { S[kind] = S[kind].filter(v=> v.id!==btn.dataset[kind+'Del']); save(); render(); };
+  });
+  // add
+  const add = document.getElementById('add-'+kind);
+  if(add) add.onclick = ()=> { S[kind].push({id:id(), name:'', weight:1}); save(); render(); };
+}
+
+function loadTpl(name){
+  const t = TPL[name]; if(!t) return;
+  S.env = t.env.map(([n,w])=> ({id:id(), name:n, weight:w}));
+  S.resp = t.resp.map(([n,w])=> ({id:id(), name:n, weight:w}));
+  S.active = 'diag'; save(); render();
+}
+
+function buildReport(){
+  const m = metric();
+  const envList = S.env.filter(nonEmpty).map((x,i)=> `${i+1}. ${x.name} [вес ${clamp(x.weight,1,5)}]`).join('\n');
+  const respList = S.resp.filter(nonEmpty).map((x,i)=> `${i+1}. ${x.name} [вес ${clamp(x.weight,1,5)}]`).join('\n');
+  const text = `ЗАКОН НЕОБХОДИМОГО РАЗНООБРАЗИЯ — ОЦЕНКА
+Дата/время: ${new Date().toLocaleString()}
+
+Внешнее разнообразие: ${m.envCount} (вес ${m.envW})
+${envList}
+
+Управленческие ветви: ${m.respCount} (вес ${m.respW})
+${respList}
+
+Индексы покрытия:
+— Простой: ${m.ratio}
+— Взвешенный: ${m.ratioW} (${m.status[0]})
+— Сложность (H): среда ${m.Henv} бита, управление ${m.Hresp} бита, разрыв ${m.Hgap} бита
+
+Рекомендации:
+${m.ratioW<1.5? '• Усилить управление: делегирование, SOP/плейбуки, оффер‑матрицы, конфигурируемые правила ИС.' : '• Управленческое разнообразие в норме: поддерживайте ежемесячную калибровку.'}
+${(m.ratioW<1 || m.envCount>20)? '• Ослабить внешнее разнообразие: сегментация, стандарты входа, окна/квоты, рационализация SKU.' : '• Внешнее разнообразие под контролем: держите стандарты входа актуальными.'}
+
+Заметки:
+${S.notes||'—'}`;
+  S.report = text; save(); render();
+  navigator.clipboard.writeText(text).catch(()=>{});
+}
+
+function exportJSON(){
+  const m = metric();
+  const data = { generatedAt: new Date().toISOString(), envItems: S.env.filter(nonEmpty), respItems: S.resp.filter(nonEmpty), notes: S.notes, metrics: m };
+  const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'lrv-assessment.json'; a.click(); URL.revokeObjectURL(url);
+}
+
+function importJSON(file){
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    try{
+      const data = JSON.parse(e.target.result);
+      S.env = (data.envItems||[]).map(x=> ({id:id(), name:x.name, weight: clamp(x.weight,1,5)}));
+      S.resp = (data.respItems||[]).map(x=> ({id:id(), name:x.name, weight: clamp(x.weight,1,5)}));
+      S.notes = data.notes||''; S.active='diag'; save(); render();
+    }catch(err){ alert('Не удалось импортировать JSON'); }
+  };
+  reader.readAsText(file);
+}
+
+function resetAll(){
+  S.env=[{id:id(), name:'', weight:1}]; S.resp=[{id:id(), name:'', weight:1}]; S.notes=''; S.report=''; save(); render();
+}
+
+// Helpers
+function escapeHtml(s){ return (s||'').replace(/[&<>]/g, c=> ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function escapeAttr(s){ return escapeHtml(s).replace(/"/g,'&quot;'); }
+
+// Boot
+load();
+render();
+bindList('env'); bindList('resp');
+
+function bindList(kind){ // initial bind (since render runs once here)
+  document.addEventListener('input', (e)=>{
+    const t=e.target;
+    if(t.matches(`[data-${kind}]`)){ const x=S[kind].find(v=> v.id===t.dataset[kind]); if(x){ x.name=t.value; save(); } }
+    if(t.matches(`[data-${kind}-w]`)){ const x=S[kind].find(v=> v.id===t.dataset[kind+'W']); if(x){ x.weight=clamp(t.value,1,5); save(); } }
+  });
+  document.addEventListener('click', (e)=>{
+    const t=e.target;
+    if(t.matches(`[data-${kind}-del]`)){ S[kind]=S[kind].filter(v=> v.id!==t.dataset[kind+'Del']); save(); render(); }
+    if(t.id==='add-'+kind){ S[kind].push({id:id(), name:'', weight:1}); save(); render(); }
+    if(t.id==='tplBtn'){ $('#tplMenu')?.classList.toggle('hidden'); }
+    if(t.closest('#tplMenu') && t.dataset.tpl){ loadTpl(t.dataset.tpl); }
+    if(t.id==='exportBtn') exportJSON();
+    if(t.id==='printBtn') window.print();
+    if(t.id==='reportBtn') buildReport();
+    if(t.id==='resetBtn') resetAll();
+    if(t.id==='importFile'){} // handled by change
+  });
+  $('#importFile')?.addEventListener('change',(e)=> e.target.files[0] && importJSON(e.target.files[0]));
+}
+</script>
+</body>
+</html>
